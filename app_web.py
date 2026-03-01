@@ -14,7 +14,6 @@ st.set_page_config(page_title="Sổ Thu Chi", page_icon="💰", layout="wide")
 
 # ==========================================
 # CÀI ĐẶT MỤC TIÊU CHI TIÊU (TARGET)
-# Bạn có thể tự sửa các con số này theo ý muốn!
 # ==========================================
 TARGET_THANG = {
     "Ăn uống": 4000000,
@@ -32,21 +31,35 @@ def load_data():
 
 data = load_data()
 
-# Tính toán con số tổng quan
+# --- TÍNH TOÁN CÁC CON SỐ ---
 tong_thu = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Thu nhập')
 tong_chi = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Chi tiêu')
 con_lai = tong_thu - tong_chi
+
+# Thuật toán tính riêng "Chi tiêu tháng này"
+chi_thang_nay = 0
+if data:
+    df_tam = pd.DataFrame(data)
+    if 'created_at' in df_tam.columns:
+        # Lấy tháng hiện tại chuẩn giờ Việt Nam
+        thang_hien_tai = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%m/%Y')
+        df_tam['Tháng'] = pd.to_datetime(df_tam['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh').dt.strftime('%m/%Y')
+        
+        # Lọc tìm các khoản chi tiêu của đúng tháng này
+        df_chi_thang = df_tam[(df_tam['loai_giao_dich'] == 'Chi tiêu') & (df_tam['Tháng'] == thang_hien_tai)]
+        chi_thang_nay = int(df_chi_thang['so_tien'].sum())
 
 # ==========================================
 # GIAO DIỆN CHÍNH
 # ==========================================
 st.title("📊 Quản Lý Tài Chính Cá Nhân")
 
-# 1. Hiển thị 3 Thẻ Thống Kê
-col1, col2, col3 = st.columns(3)
+# 1. Hiển thị 4 Thẻ Thống Kê (Đã thêm Chi Tháng Này)
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("Tổng Thu Nhập", f"{tong_thu:,} đ")
 col2.metric("Tổng Chi Tiêu", f"{tong_chi:,} đ")
-col3.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai)
+col3.metric("Chi Tháng Này", f"{chi_thang_nay:,} đ") # Thẻ mới xuất hiện ở đây!
+col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai) # Số âm tự động báo đỏ
 
 st.divider()
 
@@ -54,12 +67,11 @@ st.divider()
 tab1, tab2 = st.tabs(["📝 Ghi chép & Lịch sử", "📈 Phân tích & Cảnh báo"])
 
 # -------------------------------------------------------------------
-# TAB 1: GHI CHÉP & LỊCH SỬ (Như cũ)
+# TAB 1: GHI CHÉP & LỊCH SỬ
 # -------------------------------------------------------------------
 with tab1:
     cot_trai, cot_phai = st.columns([1, 2])
     
-    # CỘT TRÁI: FORM NHẬP LIỆU
     with cot_trai:
         st.subheader("Thêm Giao Dịch")
         with st.form("form_nhap_lieu", clear_on_submit=True):
@@ -78,7 +90,6 @@ with tab1:
                     st.success("Đã lưu thành công!")
                     st.rerun()
 
-    # CỘT PHẢI: LỊCH SỬ
     with cot_phai:
         st.subheader("Lịch sử chi tiết")
         if data:
@@ -91,48 +102,39 @@ with tab1:
                 
             df_hien_thi = df.rename(columns={'loai_giao_dich': 'Loại', 'hang_muc': 'Hạng mục', 'so_tien': 'Số tiền (đ)', 'noi_dung': 'Ghi chú'})
             df_hien_thi = df_hien_thi[['Thời gian', 'Loại', 'Hạng mục', 'Số tiền (đ)', 'Ghi chú']]
-            df_hien_thi = df_hien_thi.iloc[::-1] # Đảo ngược lên đầu
+            df_hien_thi = df_hien_thi.iloc[::-1]
             st.dataframe(df_hien_thi, use_container_width=True, hide_index=True)
         else:
             st.info("Chưa có dữ liệu giao dịch.")
 
 # -------------------------------------------------------------------
-# TAB 2: PHÂN TÍCH & CẢNH BÁO (TÍNH NĂNG MỚI BẠN YÊU CẦU)
+# TAB 2: PHÂN TÍCH & CẢNH BÁO
 # -------------------------------------------------------------------
 with tab2:
     if not data:
         st.warning("Chưa có đủ dữ liệu để phân tích. Hãy nhập thêm chi tiêu nhé!")
     else:
-        # Tiền xử lý dữ liệu cho biểu đồ
         df = pd.DataFrame(data)
         df['Thời gian thực'] = pd.to_datetime(df['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh')
-        df['Tháng'] = df['Thời gian thực'].dt.strftime('%m/%Y') # Tạo cột Tháng để nhóm
+        df['Tháng'] = df['Thời gian thực'].dt.strftime('%m/%Y') 
         
-        # Chỉ lấy dữ liệu Chi tiêu
         df_chi = df[df['loai_giao_dich'] == 'Chi tiêu'].copy()
         
         if df_chi.empty:
             st.info("Chưa có khoản chi tiêu nào để tính toán cảnh báo.")
         else:
-            # 1. BIỂU ĐỒ SO SÁNH TỔNG CHI TIÊU GIỮA CÁC THÁNG
             st.subheader("📊 So sánh Tổng chi tiêu các tháng")
             chi_theo_thang = df_chi.groupby('Tháng')['so_tien'].sum().reset_index()
-            # Streamlit vẽ biểu đồ cột siêu dễ:
             st.bar_chart(data=chi_theo_thang.set_index('Tháng'), y='so_tien', color="#F44336")
             
             st.divider()
             
-            # 2. HỆ THỐNG CẢNH BÁO VÀ THEO DÕI TARGET THÁNG HIỆN TẠI
             st.subheader("🚨 Hệ thống Cảnh báo Tháng này")
-            
-            # Lấy tháng hiện tại
             thang_hien_tai = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%m/%Y')
             
-            # Lọc dữ liệu chỉ của tháng hiện tại
             df_thang_nay = df_chi[df_chi['Tháng'] == thang_hien_tai]
-            chi_thang_nay = df_thang_nay.groupby('hang_muc')['so_tien'].sum().to_dict()
+            chi_thang_nay_dict = df_thang_nay.groupby('hang_muc')['so_tien'].sum().to_dict()
             
-            # Lọc dữ liệu của tất cả các tháng TRƯỚC ĐÓ để tính trung bình
             df_thang_truoc = df_chi[df_chi['Tháng'] != thang_hien_tai]
             so_thang_truoc = df_thang_truoc['Tháng'].nunique()
             
@@ -140,11 +142,10 @@ with tab2:
             if so_thang_truoc > 0:
                 trung_binh_thang_truoc = (df_thang_truoc.groupby('hang_muc')['so_tien'].sum() / so_thang_truoc).to_dict()
 
-            # Hiển thị cảnh báo từng hạng mục
             c1, c2 = st.columns(2)
             
             for hang_muc, target in TARGET_THANG.items():
-                da_tieu = chi_thang_nay.get(hang_muc, 0)
+                da_tieu = chi_thang_nay_dict.get(hang_muc, 0)
                 tb_truoc_day = trung_binh_thang_truoc.get(hang_muc, 0)
                 
                 with (c1 if list(TARGET_THANG.keys()).index(hang_muc) % 2 == 0 else c2):
@@ -152,7 +153,6 @@ with tab2:
                         st.markdown(f"**🏷️ Hạng mục: {hang_muc}**")
                         st.write(f"Đã tiêu: **{da_tieu:,} đ** / Target: {target:,} đ")
                         
-                        # Cảnh báo lố Target
                         phan_tram = (da_tieu / target) * 100 if target > 0 else 0
                         if da_tieu > target:
                             st.error(f"❌ VƯỢT TARGET! Bạn đã tiêu lố {da_tieu - target:,} đ.")
@@ -161,6 +161,5 @@ with tab2:
                         else:
                             st.success(f"✅ An toàn. Còn lại {target - da_tieu:,} đ.")
                             
-                        # Cảnh báo so với thói quen tiêu dùng tháng trước
                         if tb_truoc_day > 0 and da_tieu > tb_truoc_day:
                             st.info(f"📈 Chú ý: Mục này đang tiêu nhiều hơn mức trung bình tháng trước ({tb_truoc_day:,.0f} đ). Cần hãm lại!")
