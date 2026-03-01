@@ -36,34 +36,55 @@ tong_thu = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') ==
 tong_chi = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Chi tiêu')
 con_lai = tong_thu - tong_chi
 
-# Thuật toán tính riêng "Chi tiêu tháng này"
+# Thuật toán tính "Tháng này" và "Tháng trước"
 chi_thang_nay = 0
+chi_thang_truoc = 0
+
 if data:
     df_tam = pd.DataFrame(data)
     if 'created_at' in df_tam.columns:
-        # Lấy tháng hiện tại chuẩn giờ Việt Nam
-        thang_hien_tai = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%m/%Y')
+        # Xác định mốc thời gian
+        now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+        thang_hien_tai = now.strftime('%m/%Y')
+        
+        # Xử lý lùi tháng (nếu là tháng 1 thì lùi về tháng 12 năm ngoái)
+        if now.month == 1:
+            thang_truoc = f"12/{now.year - 1}"
+        else:
+            thang_truoc = f"{now.month - 1:02d}/{now.year}"
+            
         df_tam['Tháng'] = pd.to_datetime(df_tam['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh').dt.strftime('%m/%Y')
         
-        # Lọc tìm các khoản chi tiêu của đúng tháng này
-        df_chi_thang = df_tam[(df_tam['loai_giao_dich'] == 'Chi tiêu') & (df_tam['Tháng'] == thang_hien_tai)]
-        chi_thang_nay = int(df_chi_thang['so_tien'].sum())
+        df_chi = df_tam[df_tam['loai_giao_dich'] == 'Chi tiêu']
+        
+        # Cắt dữ liệu ra 2 tháng
+        chi_thang_nay = int(df_chi[df_chi['Tháng'] == thang_hien_tai]['so_tien'].sum())
+        chi_thang_truoc = int(df_chi[df_chi['Tháng'] == thang_truoc]['so_tien'].sum())
 
 # ==========================================
 # GIAO DIỆN CHÍNH
 # ==========================================
 st.title("📊 Quản Lý Tài Chính Cá Nhân")
 
-# 1. Hiển thị 4 Thẻ Thống Kê (Đã thêm Chi Tháng Này)
+# 1. Hiển thị 4 Thẻ Thống Kê (Bản nâng cấp So sánh)
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Tổng Thu Nhập", f"{tong_thu:,} đ")
-col2.metric("Tổng Chi Tiêu", f"{tong_chi:,} đ")
-col3.metric("Chi Tháng Này", f"{chi_thang_nay:,} đ") # Thẻ mới xuất hiện ở đây!
-col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai) # Số âm tự động báo đỏ
+col2.metric("Chi Tháng Trước", f"{chi_thang_truoc:,} đ") 
+
+# Tính mức độ chênh lệch để vẽ mũi tên cảnh báo
+chenh_lech = chi_thang_nay - chi_thang_truoc
+col3.metric(
+    "Chi Tháng Này", 
+    f"{chi_thang_nay:,} đ", 
+    delta=f"{chenh_lech:,} đ" if chi_thang_truoc > 0 else None, 
+    delta_color="inverse" # Đảo màu: Số dương (tăng chi tiêu) = Đỏ báo động
+) 
+
+col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai)
 
 st.divider()
 
-# TẠO 2 TAB (THẺ) CHUYỂN ĐỔI GIAO DIỆN
+# TẠO 2 TAB CHUYỂN ĐỔI GIAO DIỆN
 tab1, tab2 = st.tabs(["📝 Ghi chép & Lịch sử", "📈 Phân tích & Cảnh báo"])
 
 # -------------------------------------------------------------------
