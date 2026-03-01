@@ -31,7 +31,6 @@ with st.sidebar:
     st.header("⚙️ Cài đặt Hạn mức")
     st.markdown("Kéo hoặc nhập số tiền tối đa bạn muốn chi tiêu cho tháng này:")
     
-    # Tự động tạo ô nhập số cho từng hạng mục
     for hm in st.session_state.targets.keys():
         st.session_state.targets[hm] = st.number_input(
             f"🎯 {hm} (VNĐ)", 
@@ -40,7 +39,7 @@ with st.sidebar:
             step=100000
         )
     st.divider()
-    st.info("💡 Thay đổi ở đây sẽ tự động cập nhật ngay vào bảng Cảnh báo bên ngoài.")
+    st.info("💡 Thay đổi ở đây sẽ tự động cập nhật ngay vào bảng Cảnh báo.")
 
 # --- LẤY DỮ LIỆU TỪ MÂY ---
 @st.cache_data(ttl=1) 
@@ -57,6 +56,8 @@ con_lai = tong_thu - tong_chi
 
 chi_thang_nay = 0
 chi_thang_truoc = 0
+thang_hien_tai = ""
+thang_truoc = ""
 
 if data:
     df_tam = pd.DataFrame(data)
@@ -85,8 +86,8 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Tổng Thu Nhập", f"{tong_thu:,} đ")
 col2.metric("Chi Tháng Trước", f"{chi_thang_truoc:,} đ") 
 
-chenh_lech = chi_thang_nay - chi_thang_truoc
-col3.metric("Chi Tháng Này", f"{chi_thang_nay:,} đ", delta=f"{chenh_lech:,} đ", delta_color="inverse") 
+chenh_lech_tong = chi_thang_nay - chi_thang_truoc
+col3.metric("Chi Tháng Này", f"{chi_thang_nay:,} đ", delta=f"{chenh_lech_tong:,} đ", delta_color="inverse") 
 col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai)
 
 st.divider()
@@ -135,56 +136,94 @@ with tab1:
 
 # --- TAB 2: BIỂU ĐỒ SO SÁNH & CẢNH BÁO ---
 with tab2:
-    if not data:
+    if not data or df_chi.empty:
         st.warning("Chưa có đủ dữ liệu để phân tích. Hãy nhập thêm chi tiêu nhé!")
     else:
-        df = pd.DataFrame(data)
-        df['Thời gian thực'] = pd.to_datetime(df['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh')
-        df['Tháng'] = df['Thời gian thực'].dt.strftime('%m/%Y') 
-        
-        df_chi = df[df['loai_giao_dich'] == 'Chi tiêu'].copy()
-        
-        if df_chi.empty:
-            st.info("Chưa có khoản chi tiêu nào để tính toán cảnh báo.")
+        # BẢNG TỔNG KẾT TIẾT KIỆM / TIÊU LỐ
+        st.subheader("⚖️ Báo Cáo Chênh Lệch")
+        if chenh_lech_tong < 0:
+            st.success(f"🎉 **TUYỆT VỜI!** Tháng này bạn đã **TIẾT KIỆM ĐƯỢC {abs(chenh_lech_tong):,} đ** so với tháng trước.")
+        elif chenh_lech_tong > 0:
+            st.error(f"💸 **BÁO ĐỘNG!** Tháng này bạn đã **TIÊU NHIỀU HƠN {chenh_lech_tong:,} đ** so với tháng trước.")
         else:
-            st.subheader("📊 So sánh Tổng chi tiêu các tháng")
-            chi_theo_thang = df_chi.groupby('Tháng')['so_tien'].sum().reset_index()
-            st.bar_chart(data=chi_theo_thang.set_index('Tháng'), y='so_tien', color="#F44336")
-            
-            st.divider()
-            
-            st.subheader("🚨 Hệ thống Cảnh báo Tháng này")
-            thang_hien_tai = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%m/%Y')
-            
-            df_thang_nay = df_chi[df_chi['Tháng'] == thang_hien_tai]
-            chi_thang_nay_dict = df_thang_nay.groupby('hang_muc')['so_tien'].sum().to_dict()
-            
-            df_thang_truoc = df_chi[df_chi['Tháng'] != thang_hien_tai]
-            so_thang_truoc = df_thang_truoc['Tháng'].nunique()
-            
-            trung_binh_thang_truoc = {}
-            if so_thang_truoc > 0:
-                trung_binh_thang_truoc = (df_thang_truoc.groupby('hang_muc')['so_tien'].sum() / so_thang_truoc).to_dict()
+            if chi_thang_nay > 0:
+                st.info("⚖️ Tháng này bạn chi tiêu vừa bằng tháng trước.")
+            else:
+                st.info("Chưa có dữ liệu chi tiêu để so sánh.")
 
-            c1, c2 = st.columns(2)
+        # Lấy chi tiết từng hạng mục của tháng này và tháng trước
+        df_thang_nay = df_chi[df_chi['Tháng'] == thang_hien_tai]
+        df_thang_truoc = df_chi[df_chi['Tháng'] == thang_truoc]
+        
+        chi_nay_dict = df_thang_nay.groupby('hang_muc')['so_tien'].sum().to_dict()
+        chi_truoc_dict = df_thang_truoc.groupby('hang_muc')['so_tien'].sum().to_dict()
+        
+        # Tạo dữ liệu cho Bảng đối chiếu
+        danh_sach_hang_muc = set(list(chi_nay_dict.keys()) + list(chi_truoc_dict.keys()))
+        bang_so_sanh = []
+        
+        for hm in danh_sach_hang_muc:
+            nay = chi_nay_dict.get(hm, 0)
+            truoc = chi_truoc_dict.get(hm, 0)
+            chenh = nay - truoc
             
-            # SỬA LẠI: Lấy Target từ st.session_state.targets (được điều chỉnh từ Sidebar)
-            for hang_muc, target in st.session_state.targets.items():
-                da_tieu = chi_thang_nay_dict.get(hang_muc, 0)
-                tb_truoc_day = trung_binh_thang_truoc.get(hang_muc, 0)
+            if chenh < 0:
+                danh_gia = "🟢 Tiết kiệm"
+            elif chenh > 0:
+                danh_gia = "🔴 Tiêu lố"
+            else:
+                danh_gia = "⚪ Bằng nhau"
                 
-                with (c1 if list(st.session_state.targets.keys()).index(hang_muc) % 2 == 0 else c2):
-                    with st.container(border=True):
-                        st.markdown(f"**🏷️ Hạng mục: {hang_muc}**")
-                        st.write(f"Đã tiêu: **{da_tieu:,} đ** / Target: {target:,} đ")
-                        
-                        phan_tram = (da_tieu / target) * 100 if target > 0 else 0
-                        if da_tieu > target:
-                            st.error(f"❌ VƯỢT TARGET! Bạn đã tiêu lố {da_tieu - target:,} đ.")
-                        elif phan_tram >= 80:
-                            st.warning(f"⚠️ Sắp hết hạn mức! Đã dùng {phan_tram:.1f}%.")
-                        else:
-                            st.success(f"✅ An toàn. Còn lại {target - da_tieu:,} đ.")
-                            
-                        if tb_truoc_day > 0 and da_tieu > tb_truoc_day:
-                            st.info(f"📈 Chú ý: Mục này đang tiêu nhiều hơn trung bình các tháng trước ({tb_truoc_day:,.0f} đ).")
+            bang_so_sanh.append({
+                "Hạng mục": hm,
+                "Tháng Trước (đ)": truoc,
+                "Tháng Này (đ)": nay,
+                "Chênh Lệch (đ)": chenh,
+                "Đánh Giá": danh_gia
+            })
+        
+        if bang_so_sanh:
+            df_bang = pd.DataFrame(bang_so_sanh)
+            # Sắp xếp để những mục tiêu lố nhiều nhất nổi lên trên
+            df_bang = df_bang.sort_values(by="Chênh Lệch (đ)", ascending=False)
+            
+            st.markdown("##### 📌 Chi tiết từng hạng mục")
+            st.dataframe(
+                df_bang, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Tháng Trước (đ)": st.column_config.NumberColumn(format="%d"),
+                    "Tháng Này (đ)": st.column_config.NumberColumn(format="%d"),
+                    "Chênh Lệch (đ)": st.column_config.NumberColumn(format="%d"),
+                }
+            )
+            
+        st.divider()
+
+        # BIỂU ĐỒ XU HƯỚNG THEO THÁNG
+        st.subheader("📈 Biểu đồ xu hướng các tháng")
+        chi_theo_thang = df_chi.groupby('Tháng')['so_tien'].sum().reset_index()
+        st.bar_chart(data=chi_theo_thang.set_index('Tháng'), y='so_tien', color="#38A896")
+
+        st.divider()
+        
+        # HỆ THỐNG KIỂM TRA TARGET THÁNG NÀY
+        st.subheader("🎯 Kiểm tra Hạn mức (Target) Tháng này")
+        c1, c2 = st.columns(2)
+        
+        for hang_muc, target in st.session_state.targets.items():
+            da_tieu = chi_nay_dict.get(hang_muc, 0)
+            
+            with (c1 if list(st.session_state.targets.keys()).index(hang_muc) % 2 == 0 else c2):
+                with st.container(border=True):
+                    st.markdown(f"**🏷️ {hang_muc}**")
+                    st.write(f"Đã tiêu: **{da_tieu:,} đ** / Target: {target:,} đ")
+                    
+                    phan_tram = (da_tieu / target) * 100 if target > 0 else 0
+                    if da_tieu > target:
+                        st.error(f"❌ Bạn đã tiêu lố {da_tieu - target:,} đ.")
+                    elif phan_tram >= 80:
+                        st.warning(f"⚠️ Cẩn thận! Đã dùng {phan_tram:.1f}% hạn mức.")
+                    else:
+                        st.success(f"✅ An toàn. Còn dư {target - da_tieu:,} đ.")
