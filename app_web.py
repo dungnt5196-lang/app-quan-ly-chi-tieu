@@ -9,45 +9,74 @@ SUPABASE_URL = "https://kjzywvulfspgogobdaoe.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtqenl3dnVsZnNwZ29nb2JkYW9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyNjcwMTksImV4cCI6MjA4Nzg0MzAxOX0.dtF4tP7em8gJOYO85v5-z8GaYPZFhuUCfmNw8YOVgT4"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- CẤU HÌNH TRANG ---
 st.set_page_config(page_title="Sổ Thu Chi", page_icon="💰", layout="wide")
 
 # ==========================================
-# KHỞI TẠO BỘ NHỚ LƯU TARGET CÓ THỂ ĐIỀU CHỈNH
+# 1. XỬ LÝ DỮ LIỆU & ĐỒNG BỘ TARGET TỪ MÂY
 # ==========================================
-if 'targets' not in st.session_state:
-    st.session_state.targets = {
-        "Ăn uống": 4000000,
-        "Tiền phòng": 3000000,
-        "Đi lại": 800000,
-        "Mua sắm": 1500000,
-        "Khác": 1000000
-    }
+DEFAULT_TARGETS = {
+    "Ăn uống": 4000000,
+    "Tiền phòng": 3000000,
+    "Đi lại": 800000,
+    "Mua sắm": 1500000,
+    "Khác": 1000000
+}
 
-# ==========================================
-# MENU BÊN TRÁI (SIDEBAR) ĐỂ CHỈNH TARGET
-# ==========================================
-with st.sidebar:
-    st.header("⚙️ Cài đặt Hạn mức")
-    st.markdown("Kéo hoặc nhập số tiền tối đa bạn muốn chi tiêu cho tháng này:")
-    for hm in st.session_state.targets.keys():
-        st.session_state.targets[hm] = st.number_input(
-            f"🎯 {hm} (VNĐ)", min_value=0, value=st.session_state.targets[hm], step=100000
-        )
-    st.divider()
-    st.info("💡 Thay đổi ở đây sẽ tự động cập nhật ngay vào bảng Cảnh báo bên ngoài.")
-
-# --- LẤY DỮ LIỆU TỪ MÂY ---
 @st.cache_data(ttl=1) 
 def load_data():
     response = supabase.table("chi_tieu").select("*").execute()
     return response.data
 
 data = load_data()
+df_all = pd.DataFrame(data) if data else pd.DataFrame()
 
-# --- TÍNH TOÁN CÁC CON SỐ CHÍNH ---
-tong_thu = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Thu nhập')
-tong_chi = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Chi tiêu')
+current_targets = DEFAULT_TARGETS.copy()
+df_tam = pd.DataFrame()
+
+if not df_all.empty and 'loai_giao_dich' in df_all.columns:
+    # Lấy lịch sử Target ẩn trên mây để đồng bộ mọi thiết bị
+    df_targets = df_all[df_all['loai_giao_dich'] == 'Cài đặt Target']
+    if not df_targets.empty:
+        if 'created_at' in df_targets.columns:
+            df_targets = df_targets.sort_values('created_at', ascending=False)
+        df_targets = df_targets.drop_duplicates(subset=['hang_muc'])
+        for _, row in df_targets.iterrows():
+            if row['hang_muc'] in current_targets:
+                current_targets[row['hang_muc']] = int(row['so_tien'])
+    
+    # Lọc bỏ data Target ẩn để bảng Thống kê thu chi không bị sai số
+    df_tam = df_all[df_all['loai_giao_dich'] != 'Cài đặt Target'].copy()
+
+# ==========================================
+# 2. MENU BÊN TRÁI (ĐÃ THÊM NÚT LƯU ĐỒNG BỘ)
+# ==========================================
+with st.sidebar:
+    st.header("⚙️ Cài đặt Hạn mức")
+    st.markdown("Chỉnh số tiền và bấm **Lưu Đồng Bộ** để lưu cho mọi thiết bị:")
+    
+    with st.form("form_target"):
+        new_targets = {}
+        for hm, val in current_targets.items():
+            new_targets[hm] = st.number_input(f"🎯 {hm} (VNĐ)", min_value=0, value=val, step=100000)
+        
+        # Nút này sẽ bắn dữ liệu lên Supabase
+        if st.form_submit_button("💾 Lưu Đồng Bộ Lên Mây", type="primary"):
+            for hm, val in new_targets.items():
+                if val != current_targets[hm]:
+                    supabase.table("chi_tieu").insert({
+                        "loai_giao_dich": "Cài đặt Target", 
+                        "hang_muc": hm, 
+                        "so_tien": val, 
+                        "noi_dung": "System"
+                    }).execute()
+            st.success("Đã đồng bộ thành công! Hãy tải lại trang.")
+            st.rerun()
+
+# ==========================================
+# 3. TÍNH TOÁN CÁC CON SỐ THỐNG KÊ
+# ==========================================
+tong_thu = int(df_tam[df_tam['loai_giao_dich'] == 'Thu nhập']['so_tien'].sum()) if not df_tam.empty else 0
+tong_chi = int(df_tam[df_tam['loai_giao_dich'] == 'Chi tiêu']['so_tien'].sum()) if not df_tam.empty else 0
 con_lai = tong_thu - tong_chi
 
 chi_thang_nay = 0
@@ -56,40 +85,37 @@ thang_hien_tai = ""
 thang_truoc = ""
 df_chi = pd.DataFrame()
 
-if data:
-    df_tam = pd.DataFrame(data)
-    if 'created_at' in df_tam.columns:
-        now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
-        thang_hien_tai = now.strftime('%m/%Y')
+if not df_tam.empty and 'created_at' in df_tam.columns:
+    now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+    thang_hien_tai = now.strftime('%m/%Y')
+    
+    if now.month == 1:
+        thang_truoc = f"12/{now.year - 1}"
+    else:
+        thang_truoc = f"{now.month - 1:02d}/{now.year}"
         
-        if now.month == 1:
-            thang_truoc = f"12/{now.year - 1}"
-        else:
-            thang_truoc = f"{now.month - 1:02d}/{now.year}"
-            
-        df_tam['Tháng'] = pd.to_datetime(df_tam['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh').dt.strftime('%m/%Y')
-        df_chi = df_tam[df_tam['loai_giao_dich'] == 'Chi tiêu']
-        
-        chi_thang_nay = int(df_chi[df_chi['Tháng'] == thang_hien_tai]['so_tien'].sum())
-        chi_thang_truoc = int(df_chi[df_chi['Tháng'] == thang_truoc]['so_tien'].sum())
+    df_tam['Tháng'] = pd.to_datetime(df_tam['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh').dt.strftime('%m/%Y')
+    df_chi = df_tam[df_tam['loai_giao_dich'] == 'Chi tiêu']
+    
+    chi_thang_nay = int(df_chi[df_chi['Tháng'] == thang_hien_tai]['so_tien'].sum()) if not df_chi.empty else 0
+    chi_thang_truoc = int(df_chi[df_chi['Tháng'] == thang_truoc]['so_tien'].sum()) if not df_chi.empty else 0
 
 # ==========================================
-# GIAO DIỆN CHÍNH (FULL TRANG - KHÔNG DÙNG TAB)
+# 4. GIAO DIỆN CHÍNH TRÊN MÀN HÌNH
 # ==========================================
 st.title("📊 Quản Lý Tài Chính Cá Nhân")
 
-# --- 1. HIỂN THỊ THẺ THỐNG KÊ ---
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Tổng Thu Nhập", f"{tong_thu:,} đ")
 col2.metric("Chi Tháng Trước", f"{chi_thang_truoc:,} đ") 
 
-chenh_lech_tong = chi_thang_nay - chi_thang_truoc
+# Công thức: Tháng Này - Tháng Trước (Dương = Tiêu lố, Âm = Tiết kiệm)
+chenh_lech_tong = chi_thang_nay - chi_thang_truoc 
 col3.metric("Chi Tháng Này", f"{chi_thang_nay:,} đ", delta=f"{chenh_lech_tong:,} đ", delta_color="inverse") 
 col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai)
 
 st.markdown("---")
 
-# --- 2. KẾT LUẬN SO SÁNH NHANH ---
 if not df_chi.empty:
     if chenh_lech_tong < 0:
         st.success(f"🎉 **TUYỆT VỜI!** Tháng này bạn đang **TIẾT KIỆM ĐƯỢC {abs(chenh_lech_tong):,} đ** so với tháng trước.")
@@ -101,9 +127,9 @@ if not df_chi.empty:
 else:
     st.info("👋 Chào mừng bạn! Hãy nhập khoản chi tiêu đầu tiên nhé.")
 
-st.container(height=20, border=False) # Tạo khoảng trống cho thoáng
+st.container(height=20, border=False)
 
-# --- 3. KHU VỰC NHẬP LIỆU & LỊCH SỬ ---
+# --- KHU VỰC NHẬP LIỆU ---
 st.subheader("📝 Ghi chép & Lịch sử")
 cot_trai, cot_phai = st.columns([1, 2])
 
@@ -125,22 +151,21 @@ with cot_trai:
                 st.rerun()
 
 with cot_phai:
-    if data:
-        df = pd.DataFrame(data)
-        if 'created_at' in df.columns:
-            df['Thời gian thực'] = pd.to_datetime(df['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh')
-            df['Thời gian'] = df['Thời gian thực'].dt.strftime('%H:%M - %d/%m/%Y')
+    if not df_tam.empty:
+        df_hien_thi = df_tam.rename(columns={'loai_giao_dich': 'Loại', 'hang_muc': 'Hạng mục', 'so_tien': 'Số tiền (đ)', 'noi_dung': 'Ghi chú'})
+        if 'Thời gian thực' not in df_hien_thi.columns and 'created_at' in df_hien_thi.columns:
+            df_hien_thi['Thời gian thực'] = pd.to_datetime(df_hien_thi['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh')
+            df_hien_thi['Thời gian'] = df_hien_thi['Thời gian thực'].dt.strftime('%H:%M - %d/%m/%Y')
         else:
-            df['Thời gian'] = "Không rõ"
+            df_hien_thi['Thời gian'] = "Không rõ"
             
-        df_hien_thi = df.rename(columns={'loai_giao_dich': 'Loại', 'hang_muc': 'Hạng mục', 'so_tien': 'Số tiền (đ)', 'noi_dung': 'Ghi chú'})
         df_hien_thi = df_hien_thi[['Thời gian', 'Loại', 'Hạng mục', 'Số tiền (đ)', 'Ghi chú']]
         df_hien_thi = df_hien_thi.iloc[::-1]
         st.dataframe(df_hien_thi, use_container_width=True, hide_index=True, height=350)
 
 st.markdown("---")
 
-# --- 4. BẢNG SO SÁNH ĐỐI CHIẾU CHI TIẾT ---
+# --- BẢNG SO SÁNH ĐỐI CHIẾU ---
 st.subheader("⚖️ Bảng Đối Chiếu Từng Hạng Mục")
 if not df_chi.empty:
     df_thang_nay = df_chi[df_chi['Tháng'] == thang_hien_tai]
@@ -155,41 +180,44 @@ if not df_chi.empty:
     for hm in danh_sach_hang_muc:
         nay = chi_nay_dict.get(hm, 0)
         truoc = chi_truoc_dict.get(hm, 0)
-        chenh = nay - truoc
         
-        if chenh < 0:
-            danh_gia = "🟢 Tiết kiệm"
-        elif chenh > 0:
+        # Công thức: Tháng Này - Tháng Trước
+        chenh = nay - truoc 
+        
+        if chenh > 0:
             danh_gia = "🔴 Tiêu lố"
+            hien_thi_chenh = f"+{chenh:,} đ"
+        elif chenh < 0:
+            danh_gia = "🟢 Tiết kiệm"
+            hien_thi_chenh = f"{chenh:,} đ" # Số âm tự có dấu trừ
         else:
             danh_gia = "⚪ Bằng nhau"
+            hien_thi_chenh = "0 đ"
             
         bang_so_sanh.append({
             "Hạng mục": hm,
             "Tháng Trước": f"{truoc:,} đ",
             "Tháng Này": f"{nay:,} đ",
-            "Chênh Lệch": f"{chenh:,} đ" if chenh <= 0 else f"+{chenh:,} đ",
+            "Chênh Lệch": hien_thi_chenh,
             "Đánh Giá": danh_gia,
-            "_sort_val": chenh # Cột ẩn dùng để sắp xếp
+            "_sort_val": chenh 
         })
     
     if bang_so_sanh:
         df_bang = pd.DataFrame(bang_so_sanh)
-        # Sắp xếp để những mục tiêu lố nhiều nhất nổi lên trên cùng
+        # Sắp xếp để những mục tiêu lố nhiều nhất (số dương lớn nhất) nổi lên trên
         df_bang = df_bang.sort_values(by="_sort_val", ascending=False).drop(columns=["_sort_val"])
-        
         st.dataframe(df_bang, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 
-# --- 5. CẢNH BÁO TARGET & BIỂU ĐỒ ---
+# --- CẢNH BÁO TARGET & BIỂU ĐỒ ---
 st.subheader("🎯 Theo dõi Hạn mức & Xu hướng")
 if not df_chi.empty:
     c_trai, c_phai = st.columns([1, 1])
     
-    # Bên trái: Danh sách cảnh báo Target
     with c_trai:
-        for hang_muc, target in st.session_state.targets.items():
+        for hang_muc, target in current_targets.items():
             da_tieu = chi_nay_dict.get(hang_muc, 0) if 'chi_nay_dict' in locals() else 0
             
             with st.container(border=True):
@@ -204,7 +232,6 @@ if not df_chi.empty:
                 else:
                     st.success(f"✅ An toàn. Còn dư {target - da_tieu:,} đ.")
                     
-    # Bên phải: Biểu đồ cột tổng quan các tháng
     with c_phai:
         st.markdown("**Biểu đồ Tổng chi tiêu các tháng**")
         chi_theo_thang = df_chi.groupby('Tháng')['so_tien'].sum().reset_index()
