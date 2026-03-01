@@ -13,15 +13,34 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 st.set_page_config(page_title="Sổ Thu Chi", page_icon="💰", layout="wide")
 
 # ==========================================
-# CÀI ĐẶT MỤC TIÊU CHI TIÊU (TARGET)
+# KHỞI TẠO BỘ NHỚ LƯU TARGET CÓ THỂ ĐIỀU CHỈNH
 # ==========================================
-TARGET_THANG = {
-    "Ăn uống": 4000000,
-    "Tiền phòng": 3000000,
-    "Đi lại": 800000,
-    "Mua sắm": 1500000,
-    "Khác": 1000000
-}
+if 'targets' not in st.session_state:
+    st.session_state.targets = {
+        "Ăn uống": 4000000,
+        "Tiền phòng": 3000000,
+        "Đi lại": 800000,
+        "Mua sắm": 1500000,
+        "Khác": 1000000
+    }
+
+# ==========================================
+# MENU BÊN TRÁI (SIDEBAR) ĐỂ CHỈNH TARGET
+# ==========================================
+with st.sidebar:
+    st.header("⚙️ Cài đặt Hạn mức")
+    st.markdown("Kéo hoặc nhập số tiền tối đa bạn muốn chi tiêu cho tháng này:")
+    
+    # Tự động tạo ô nhập số cho từng hạng mục
+    for hm in st.session_state.targets.keys():
+        st.session_state.targets[hm] = st.number_input(
+            f"🎯 {hm} (VNĐ)", 
+            min_value=0, 
+            value=st.session_state.targets[hm], 
+            step=100000
+        )
+    st.divider()
+    st.info("💡 Thay đổi ở đây sẽ tự động cập nhật ngay vào bảng Cảnh báo bên ngoài.")
 
 # --- LẤY DỮ LIỆU TỪ MÂY ---
 @st.cache_data(ttl=1) 
@@ -31,7 +50,7 @@ def load_data():
 
 data = load_data()
 
-# --- TÍNH TOÁN CÁC CON SỐ ---
+# --- TÍNH TOÁN CÁC CON SỐ CHÍNH ---
 tong_thu = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Thu nhập')
 tong_chi = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Chi tiêu')
 con_lai = tong_thu - tong_chi
@@ -66,20 +85,13 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Tổng Thu Nhập", f"{tong_thu:,} đ")
 col2.metric("Chi Tháng Trước", f"{chi_thang_truoc:,} đ") 
 
-# SỬA LỖI TẠI ĐÂY: Bắt buộc luôn luôn hiện mũi tên so sánh (delta)
 chenh_lech = chi_thang_nay - chi_thang_truoc
-col3.metric(
-    "Chi Tháng Này", 
-    f"{chi_thang_nay:,} đ", 
-    delta=f"{chenh_lech:,} đ", 
-    delta_color="inverse" 
-) 
-
+col3.metric("Chi Tháng Này", f"{chi_thang_nay:,} đ", delta=f"{chenh_lech:,} đ", delta_color="inverse") 
 col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai)
 
 st.divider()
 
-# 2. TẠO TAB CHUYỂN ĐỔI GIAO DIỆN
+# 2. TẠO TAB CHUYỂN ĐỔI
 tab1, tab2 = st.tabs(["📝 Ghi chép & Lịch sử", "📈 Phân tích & Cảnh báo"])
 
 # --- TAB 1: NHẬP LIỆU ---
@@ -121,7 +133,7 @@ with tab1:
         else:
             st.info("Chưa có dữ liệu giao dịch.")
 
-# --- TAB 2: BIỂU ĐỒ SO SÁNH (CÁI BẠN ĐANG TÌM Ở ĐÂY) ---
+# --- TAB 2: BIỂU ĐỒ SO SÁNH & CẢNH BÁO ---
 with tab2:
     if not data:
         st.warning("Chưa có đủ dữ liệu để phân tích. Hãy nhập thêm chi tiêu nhé!")
@@ -137,7 +149,6 @@ with tab2:
         else:
             st.subheader("📊 So sánh Tổng chi tiêu các tháng")
             chi_theo_thang = df_chi.groupby('Tháng')['so_tien'].sum().reset_index()
-            # Đây chính là cột biểu đồ so sánh các tháng
             st.bar_chart(data=chi_theo_thang.set_index('Tháng'), y='so_tien', color="#F44336")
             
             st.divider()
@@ -157,11 +168,12 @@ with tab2:
 
             c1, c2 = st.columns(2)
             
-            for hang_muc, target in TARGET_THANG.items():
+            # SỬA LẠI: Lấy Target từ st.session_state.targets (được điều chỉnh từ Sidebar)
+            for hang_muc, target in st.session_state.targets.items():
                 da_tieu = chi_thang_nay_dict.get(hang_muc, 0)
                 tb_truoc_day = trung_binh_thang_truoc.get(hang_muc, 0)
                 
-                with (c1 if list(TARGET_THANG.keys()).index(hang_muc) % 2 == 0 else c2):
+                with (c1 if list(st.session_state.targets.keys()).index(hang_muc) % 2 == 0 else c2):
                     with st.container(border=True):
                         st.markdown(f"**🏷️ Hạng mục: {hang_muc}**")
                         st.write(f"Đã tiêu: **{da_tieu:,} đ** / Target: {target:,} đ")
@@ -175,4 +187,4 @@ with tab2:
                             st.success(f"✅ An toàn. Còn lại {target - da_tieu:,} đ.")
                             
                         if tb_truoc_day > 0 and da_tieu > tb_truoc_day:
-                            st.info(f"📈 Chú ý: Mục này đang tiêu nhiều hơn mức trung bình tháng trước ({tb_truoc_day:,.0f} đ). Cần hãm lại!")
+                            st.info(f"📈 Chú ý: Mục này đang tiêu nhiều hơn trung bình các tháng trước ({tb_truoc_day:,.0f} đ).")
