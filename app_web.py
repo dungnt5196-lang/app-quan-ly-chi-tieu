@@ -36,28 +36,23 @@ tong_thu = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') ==
 tong_chi = sum(item['so_tien'] for item in data if item.get('loai_giao_dich') == 'Chi tiêu')
 con_lai = tong_thu - tong_chi
 
-# Thuật toán tính "Tháng này" và "Tháng trước"
 chi_thang_nay = 0
 chi_thang_truoc = 0
 
 if data:
     df_tam = pd.DataFrame(data)
     if 'created_at' in df_tam.columns:
-        # Xác định mốc thời gian
         now = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
         thang_hien_tai = now.strftime('%m/%Y')
         
-        # Xử lý lùi tháng (nếu là tháng 1 thì lùi về tháng 12 năm ngoái)
         if now.month == 1:
             thang_truoc = f"12/{now.year - 1}"
         else:
             thang_truoc = f"{now.month - 1:02d}/{now.year}"
             
         df_tam['Tháng'] = pd.to_datetime(df_tam['created_at'], utc=True).dt.tz_convert('Asia/Ho_Chi_Minh').dt.strftime('%m/%Y')
-        
         df_chi = df_tam[df_tam['loai_giao_dich'] == 'Chi tiêu']
         
-        # Cắt dữ liệu ra 2 tháng
         chi_thang_nay = int(df_chi[df_chi['Tháng'] == thang_hien_tai]['so_tien'].sum())
         chi_thang_truoc = int(df_chi[df_chi['Tháng'] == thang_truoc]['so_tien'].sum())
 
@@ -66,30 +61,28 @@ if data:
 # ==========================================
 st.title("📊 Quản Lý Tài Chính Cá Nhân")
 
-# 1. Hiển thị 4 Thẻ Thống Kê (Bản nâng cấp So sánh)
+# 1. HIỂN THỊ THẺ THỐNG KÊ
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Tổng Thu Nhập", f"{tong_thu:,} đ")
 col2.metric("Chi Tháng Trước", f"{chi_thang_truoc:,} đ") 
 
-# Tính mức độ chênh lệch để vẽ mũi tên cảnh báo
+# SỬA LỖI TẠI ĐÂY: Bắt buộc luôn luôn hiện mũi tên so sánh (delta)
 chenh_lech = chi_thang_nay - chi_thang_truoc
 col3.metric(
     "Chi Tháng Này", 
     f"{chi_thang_nay:,} đ", 
-    delta=f"{chenh_lech:,} đ" if chi_thang_truoc > 0 else None, 
-    delta_color="inverse" # Đảo màu: Số dương (tăng chi tiêu) = Đỏ báo động
+    delta=f"{chenh_lech:,} đ", 
+    delta_color="inverse" 
 ) 
 
 col4.metric("Còn Lại", f"{con_lai:,} đ", delta=con_lai)
 
 st.divider()
 
-# TẠO 2 TAB CHUYỂN ĐỔI GIAO DIỆN
+# 2. TẠO TAB CHUYỂN ĐỔI GIAO DIỆN
 tab1, tab2 = st.tabs(["📝 Ghi chép & Lịch sử", "📈 Phân tích & Cảnh báo"])
 
-# -------------------------------------------------------------------
-# TAB 1: GHI CHÉP & LỊCH SỬ
-# -------------------------------------------------------------------
+# --- TAB 1: NHẬP LIỆU ---
 with tab1:
     cot_trai, cot_phai = st.columns([1, 2])
     
@@ -128,9 +121,7 @@ with tab1:
         else:
             st.info("Chưa có dữ liệu giao dịch.")
 
-# -------------------------------------------------------------------
-# TAB 2: PHÂN TÍCH & CẢNH BÁO
-# -------------------------------------------------------------------
+# --- TAB 2: BIỂU ĐỒ SO SÁNH (CÁI BẠN ĐANG TÌM Ở ĐÂY) ---
 with tab2:
     if not data:
         st.warning("Chưa có đủ dữ liệu để phân tích. Hãy nhập thêm chi tiêu nhé!")
@@ -146,6 +137,7 @@ with tab2:
         else:
             st.subheader("📊 So sánh Tổng chi tiêu các tháng")
             chi_theo_thang = df_chi.groupby('Tháng')['so_tien'].sum().reset_index()
+            # Đây chính là cột biểu đồ so sánh các tháng
             st.bar_chart(data=chi_theo_thang.set_index('Tháng'), y='so_tien', color="#F44336")
             
             st.divider()
