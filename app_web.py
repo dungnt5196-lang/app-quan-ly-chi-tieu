@@ -11,6 +11,17 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="Sổ Thu Chi Gia Đình", page_icon="👨‍👩‍👧‍👦", layout="wide")
 
+# --- ĐOẠN CODE ẨN MENU VÀ LOGO STREAMLIT ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+# --------------------------------------------
+
 # ==========================================
 # 1. XỬ LÝ DỮ LIỆU & ĐỒNG BỘ TARGET
 # ==========================================
