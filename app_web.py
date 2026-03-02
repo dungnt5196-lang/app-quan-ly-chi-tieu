@@ -47,7 +47,6 @@ if not df_raw.empty:
 # ==========================================
 with st.sidebar:
     st.header("👥 Bộ Lọc Gia Đình")
-    # TÍNH NĂNG MỚI: Chọn xem dữ liệu của ai
     view_option = st.radio("Xem dữ liệu của:", ["Cả hai (Tổng)", "Vợ", "Chồng"], index=0)
     
     st.divider()
@@ -65,7 +64,6 @@ with st.sidebar:
 # Lọc dữ liệu hiển thị dựa trên bộ lọc Sidebar
 df_display = df_tam.copy()
 if not df_display.empty and view_option != "Cả hai (Tổng)":
-    # Nếu trong DB chưa có cột 'noi_dung' để phân biệt Vợ/Chồng thì mặc định coi như cũ
     if 'noi_dung' in df_display.columns:
         df_display = df_display[df_display['noi_dung'] == view_option]
 
@@ -76,7 +74,6 @@ t_thu = int(df_display[df_display['loai_giao_dich'] == 'Thu nhập']['so_tien'].
 t_chi = int(df_display[df_display['loai_giao_dich'] == 'Chi tiêu']['so_tien'].sum()) if not df_display.empty else 0
 c_lai = t_thu - t_chi
 
-# Tính tháng hiện tại/tháng trước cho riêng người được chọn
 c_nay = 0
 c_truoc = 0
 if not df_display.empty:
@@ -117,12 +114,13 @@ with st.form("form_nhap", clear_on_submit=True):
         st.write("") # Tạo khoảng trống
         if st.form_submit_button("💾 LƯU GIAO DỊCH", type="primary", use_container_width=True):
             if tien > 0:
-                # Dùng cột 'noi_dung' để lưu tên Vợ hoặc Chồng
+                # CẬP NHẬT: Thêm cột ghi_chu_them vào lệnh lưu
                 supabase.table("chi_tieu").insert({
                     "loai_giao_dich": loai_gd, 
                     "hang_muc": h_muc, 
                     "so_tien": tien, 
-                    "noi_dung": nguoi_nhap 
+                    "noi_dung": nguoi_nhap,
+                    "ghi_chu_them": ghi_chu 
                 }).execute()
                 st.success(f"Đã lưu khoản {loai_gd} của {nguoi_nhap}!")
                 st.rerun()
@@ -134,7 +132,18 @@ st.subheader(f"⚖️ Đối Chiếu Chi Tiết - {view_option}")
 if not df_display.empty:
     df_hien = df_display.copy()
     df_hien['Thời gian'] = df_hien['Thời gian thực'].dt.strftime('%H:%M - %d/%m/%Y')
-    df_hien = df_hien.rename(columns={'loai_giao_dich': 'Loại', 'hang_muc': 'Hạng mục', 'so_tien': 'Tiền (đ)', 'noi_dung': 'Người nhập'})
+    
+    # CẬP NHẬT: Xử lý an toàn nếu database chưa có cột ghi_chu_them ở các giao dịch cũ
+    if 'ghi_chu_them' not in df_hien.columns:
+        df_hien['ghi_chu_them'] = ""
+        
+    df_hien = df_hien.rename(columns={
+        'loai_giao_dich': 'Loại', 
+        'hang_muc': 'Hạng mục', 
+        'so_tien': 'Tiền (đ)', 
+        'noi_dung': 'Người nhập',
+        'ghi_chu_them': 'Ghi chú' # Đổi tên hiển thị cho đẹp
+    })
     
     # Bảng so sánh hàng cột (Chỉ dành cho Chi tiêu)
     df_chi_view = df_display[df_display['loai_giao_dich'] == 'Chi tiêu']
@@ -151,7 +160,8 @@ if not df_display.empty:
 
     st.markdown("---")
     st.write("**Lịch sử giao dịch gần đây:**")
-    st.dataframe(df_hien[['Thời gian', 'Người nhập', 'Loại', 'Hạng mục', 'Tiền (đ)']].iloc[::-1], use_container_width=True, hide_index=True, height=300)
+    # CẬP NHẬT: Thêm 'Ghi chú' vào danh sách hiển thị
+    st.dataframe(df_hien[['Thời gian', 'Người nhập', 'Loại', 'Hạng mục', 'Tiền (đ)', 'Ghi chú']].iloc[::-1], use_container_width=True, hide_index=True, height=300)
 
 # --- BIỂU ĐỒ TỔNG QUAN (LUÔN HIỆN TỔNG GIA ĐÌNH) ---
 st.divider()
@@ -161,7 +171,6 @@ if not df_tam.empty:
     with c_bi_1:
         st.write("Chi tiêu theo người nhập:")
         df_nguoi = df_tam[df_tam['loai_giao_dich'] == 'Chi tiêu'].groupby('noi_dung')['so_tien'].sum().reset_index()
-        # Biểu đồ tròn so sánh Vợ/Chồng tiêu bao nhiêu 
         st.bar_chart(data=df_nguoi.set_index('noi_dung'), y='so_tien')
     with c_bi_2:
         st.write("Xu hướng chi tiêu gia đình:")
