@@ -11,16 +11,21 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="Sổ Thu Chi Gia Đình", page_icon="👨‍👩‍👧‍👦", layout="wide")
 
-# --- ĐOẠN CODE ẨN MENU VÀ LOGO STREAMLIT ---
+# --- ĐOẠN CODE LÀM TÀNG HÌNH GIAO DIỆN STREAMLIT ---
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             header {visibility: hidden;}
+            /* Ẩn nút Deploy góc trên cùng */
+            .stAppDeployButton {display:none;}
+            /* Ẩn huy hiệu chiếc thuyền đỏ góc dưới cùng */
+            .viewerBadge_container {display:none !important;}
+            [data-testid="viewerBadge"] {display: none !important;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
-# --------------------------------------------
+# ----------------------------------------------------
 
 # ==========================================
 # 1. XỬ LÝ DỮ LIỆU & ĐỒNG BỘ TARGET
@@ -125,7 +130,6 @@ with st.form("form_nhap", clear_on_submit=True):
         st.write("") # Tạo khoảng trống
         if st.form_submit_button("💾 LƯU GIAO DỊCH", type="primary", use_container_width=True):
             if tien > 0:
-                # CẬP NHẬT: Thêm cột ghi_chu_them vào lệnh lưu
                 supabase.table("chi_tieu").insert({
                     "loai_giao_dich": loai_gd, 
                     "hang_muc": h_muc, 
@@ -144,7 +148,6 @@ if not df_display.empty:
     df_hien = df_display.copy()
     df_hien['Thời gian'] = df_hien['Thời gian thực'].dt.strftime('%H:%M - %d/%m/%Y')
     
-    # CẬP NHẬT: Xử lý an toàn nếu database chưa có cột ghi_chu_them ở các giao dịch cũ
     if 'ghi_chu_them' not in df_hien.columns:
         df_hien['ghi_chu_them'] = ""
         
@@ -153,7 +156,7 @@ if not df_display.empty:
         'hang_muc': 'Hạng mục', 
         'so_tien': 'Tiền (đ)', 
         'noi_dung': 'Người nhập',
-        'ghi_chu_them': 'Ghi chú' # Đổi tên hiển thị cho đẹp
+        'ghi_chu_them': 'Ghi chú' 
     })
     
     # Bảng so sánh hàng cột (Chỉ dành cho Chi tiêu)
@@ -171,7 +174,6 @@ if not df_display.empty:
 
     st.markdown("---")
     st.write("**Lịch sử giao dịch gần đây:**")
-    # CẬP NHẬT: Thêm 'Ghi chú' vào danh sách hiển thị
     st.dataframe(df_hien[['Thời gian', 'Người nhập', 'Loại', 'Hạng mục', 'Tiền (đ)', 'Ghi chú']].iloc[::-1], use_container_width=True, hide_index=True, height=300)
 
 # --- BIỂU ĐỒ TỔNG QUAN (LUÔN HIỆN TỔNG GIA ĐÌNH) ---
